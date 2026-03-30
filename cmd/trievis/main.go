@@ -17,7 +17,7 @@
 // trievis is a developer tool that visualises a contract's storage trie.
 // It walks every node using NodeIterator and emits:
 //  1. A structured node dump with full RLP analysis for each node.
-//  2. A Mermaid flowchart (flowchart TD) representing the trie topology.
+//  2. A Graphviz DOT digraph using shape=record with a left-right layout.
 //
 // Usage (auto mode – resolves storage root via account trie):
 //
@@ -30,7 +30,7 @@
 // --datadir must point to the directory that directly contains the "chaindata"
 // subdirectory (e.g. the directory where geth's LOCK file lives).
 //
-// Paste the "flowchart TD" section into https://mermaid.live to render.
+// Render the DOT section with: dot -Tsvg trie.dot -o trie.svg
 package main
 
 import (
@@ -105,7 +105,7 @@ var (
 	}
 	maxNodesFlag = &cli.IntFlag{
 		Name:  "max-nodes",
-		Usage: "Maximum number of nodes to include in the Mermaid diagram (0 = no limit)",
+		Usage: "Maximum number of nodes to include in the DOT diagram (0 = no limit)",
 		Value: 500,
 	}
 )
@@ -128,7 +128,7 @@ func init() {
 	app.ArgsUsage = " "
 	app.Description = `Walks every node of a contract's storage trie and emits:
   1. A raw node dump with full RLP structure analysis.
-  2. A Mermaid flowchart (flowchart TD) of the trie.
+  2. A Graphviz DOT digraph (shape=record, rankdir=LR) of the trie.
 
 --datadir must point to the directory that directly contains the 'chaindata'
 subdirectory (e.g. /data/geth if your chaindata lives at /data/geth/chaindata).
@@ -139,7 +139,7 @@ Mode A – auto (resolves storage root via the account trie):
 Mode B – manual (provide hashes directly, like geth db dumptrie):
   trievis --datadir /data/geth --stateroot <SR> --accounthash <AH> --storageroot <Root>
 
-Paste the "flowchart TD" section into https://mermaid.live to render.`
+Render with: dot -Tsvg trie.dot -o trie.svg   (or xdot trie.dot)`
 }
 
 func main() {
@@ -416,33 +416,20 @@ func visualize(ctx *cli.Context) error {
 		printNode(w, n)
 	}
 
-	// ── Mermaid diagram ────────────────────────────────────────────────────
+	// ── DOT diagram ───────────────────────────────────────────────────────
 	maxNodes := ctx.Int(maxNodesFlag.Name)
 	limit := len(nodes)
 	if maxNodes > 0 && limit > maxNodes {
 		limit = maxNodes
 	}
 
-	fmt.Fprintln(w, "\n// ── Mermaid Flowchart ──────────────────────────────────────────────")
-	fmt.Fprintln(w, "// Paste everything from 'flowchart TD' onwards into https://mermaid.live")
+	fmt.Fprintln(w, "\n// ── Graphviz DOT ───────────────────────────────────────────────────")
+	fmt.Fprintln(w, "// Save the digraph{} block below to trie.dot, then run:")
+	fmt.Fprintln(w, "//   dot -Tsvg trie.dot -o trie.svg   (or: xdot trie.dot)")
 	if limit < len(nodes) {
 		fmt.Fprintf(w, "// WARNING: trie has %d nodes; only the first %d are shown.\n", len(nodes), limit)
 	}
-	fmt.Fprintln(w, "\nflowchart TD")
-
-	for _, n := range nodes[:limit] {
-		fmt.Fprintf(w, "    n%d[\"%s\"]\n", n.idx, mermaidLabel(n))
-	}
-	for _, n := range nodes[:limit] {
-		if n.parentIdx < 0 || n.parentIdx >= limit {
-			continue
-		}
-		if n.edgeLabel != "" {
-			fmt.Fprintf(w, "    n%d -->|\"%s\"| n%d\n", n.parentIdx, mEsc(n.edgeLabel), n.idx)
-		} else {
-			fmt.Fprintf(w, "    n%d --> n%d\n", n.parentIdx, n.idx)
-		}
-	}
+	writeDOT(w, nodes[:limit])
 	return nil
 }
 
@@ -702,61 +689,113 @@ func printNode(w io.Writer, n *trieNodeInfo) {
 	fmt.Fprintln(w)
 }
 
-// mermaidLabel builds the HTML-safe multi-line label for a Mermaid node box.
-func mermaidLabel(n *trieNodeInfo) string {
-	var parts []string
-	parts = append(parts, string(n.kind))
-	parts = append(parts, "path: "+pathDisplay(n.path))
-	parts = append(parts, "hash: "+hashDisplay(n.hash))
+// writeDOT emits a Graphviz DOT digraph using shape=record with rankdir=LR.
+//
+// Layout:
+//   - Every non-leaf node is a record: left cell = metadata (kind/path/hash),
+//     right cell = child ports labelled by nibble (for BRANCH) or key segment.
+//   - BRANCH fills: #ddeeff (blue-tint).  ROOT same but titled "Root".
+//   - EXTENSION / LEAF-PREFIX fills: #ffeedd (orange-tint).
+//   - VALUE (leaf) nodes: simple non-record box, fill #eeddff (purple-tint).
+//   - LEAF-PREFIX → VALUE edge: dashed, no arrowhead.
+//   - All edges target the west (:w) port of the destination node.
+func writeDOT(w io.Writer, nodes []*trieNodeInfo) {
+	limit := len(nodes)
 
-	switch n.kind {
-	case kindBranch:
-		var nonNil []string
-		for i, child := range n.branchChildren {
-			if child != "nil" {
-				nonNil = append(nonNil, fmt.Sprintf("[%x]%s", i, child))
+	fmt.Fprintln(w, "\ndigraph storage_trie {")
+	fmt.Fprintln(w, `    graph [rankdir=LR, splines=line, ranksep=10]`)
+	fmt.Fprintln(w, `    node  [shape=record, style="rounded,filled"]`)
+	fmt.Fprintln(w)
+
+	for _, n := range nodes {
+		switch n.kind {
+		case kindBranch:
+			title := "BRANCH"
+			if n.parentIdx == -1 {
+				title = "Root"
 			}
-		}
-		if len(nonNil) > 0 {
-			// Wrap at 4 per line to keep labels readable.
-			for start := 0; start < len(nonNil); start += 4 {
-				end := start + 4
-				if end > len(nonNil) {
-					end = len(nonNil)
+			var portParts []string
+			for i, child := range n.branchChildren {
+				if child != "nil" {
+					portParts = append(portParts, fmt.Sprintf("<p%x> %x", i, i))
 				}
-				parts = append(parts, strings.Join(nonNil[start:end], " "))
 			}
+			portSection := strings.Join(portParts, " | ")
+			label := fmt.Sprintf("{ %s \\n path=%s \\n hash=%s | { %s } }",
+				title,
+				dotRecEsc(pathDisplay(n.path)),
+				dotRecEsc(hashDisplay(n.hash)),
+				portSection,
+			)
+			fmt.Fprintf(w, "    n%d [label=\"%s\" fillcolor=\"#ddeeff\"];\n", n.idx, label)
+
+		case kindExtension:
+			keyStr := fmt.Sprintf("%x", n.extKeyNibbles)
+			label := fmt.Sprintf("{ EXTENSION \\n path=%s \\n hash=%s | { <pnext> %s } }",
+				dotRecEsc(pathDisplay(n.path)),
+				dotRecEsc(hashDisplay(n.hash)),
+				dotRecEsc(keyStr),
+			)
+			fmt.Fprintf(w, "    n%d [label=\"%s\" fillcolor=\"#ffeedd\"];\n", n.idx, label)
+
+		case kindLeafPrefix:
+			// keyStr := fmt.Sprintf("%x", n.lpKeyNibbles)
+			label := fmt.Sprintf("{ LEAF \\n path=%s \\n hash=%s | { <pval> } }",
+				dotRecEsc(pathDisplay(n.path)),
+				dotRecEsc(hashDisplay(n.hash)),
+				// dotRecEsc(keyStr),
+			)
+			fmt.Fprintf(w, "    n%d [label=\"%s\" fillcolor=\"#ffeedd\"];\n", n.idx, label)
+
+		case kindValue:
+			sk := n.slotKey.Hex()
+			if len(sk) > 20 {
+				sk = sk[:18] + "..."
+			}
+			valStr := "(decode failed)"
+			if n.slotValue != nil {
+				valStr = n.slotValue.String()
+			}
+			label := fmt.Sprintf("VALUE \\n slot=%s \\n val=%s",
+				dotRecEsc(sk),
+				dotRecEsc(valStr),
+			)
+			fmt.Fprintf(w, "    n%d [label=\"%s\" fillcolor=\"#eeddff\"];\n", n.idx, label)
+
+		case kindEmbedded:
+			label := fmt.Sprintf("EMBEDDED \\n path=%s", dotRecEsc(pathDisplay(n.path)))
+			fmt.Fprintf(w, "    n%d [label=\"%s\"];\n", n.idx, label)
 		}
-	case kindExtension:
-		parts = append(parts, fmt.Sprintf("key: %x", n.extKeyNibbles))
-		parts = append(parts, "next: "+n.extNextHash)
-	case kindLeafPrefix:
-		parts = append(parts, fmt.Sprintf("key: %x", n.lpKeyNibbles))
-		if len(n.lpRawValue) > 0 {
-			parts = append(parts, fmt.Sprintf("raw: 0x%x", n.lpRawValue))
-		}
-	case kindValue:
-		// Abbreviate the slot key.
-		sk := n.slotKey.Hex()
-		if len(sk) > 14 {
-			sk = sk[:12] + "…"
-		}
-		parts = append(parts, "slot: "+sk)
-		if n.slotValue != nil {
-			parts = append(parts, "val: "+n.slotValue.String())
-		} else {
-			parts = append(parts, fmt.Sprintf("raw: 0x%x", n.slotRaw))
-		}
-	case kindEmbedded:
-		parts = append(parts, "(inline)")
 	}
 
-	// Join with Mermaid HTML line breaks and escape special characters.
-	escaped := make([]string, len(parts))
-	for i, p := range parts {
-		escaped[i] = mEsc(p)
+	fmt.Fprintln(w)
+
+	for _, n := range nodes {
+		if n.parentIdx < 0 || n.parentIdx >= limit {
+			continue
+		}
+		parent := nodes[n.parentIdx]
+
+		tailPort := ""
+		switch parent.kind {
+		case kindBranch:
+			if len(n.edgeLabel) == 3 { // "[x]" – single hex nibble
+				tailPort = fmt.Sprintf(":p%c", n.edgeLabel[1])
+			}
+		case kindExtension:
+			tailPort = ":pnext"
+		case kindLeafPrefix:
+			tailPort = ":pval"
+		}
+
+		if parent.kind == kindLeafPrefix && n.kind == kindValue {
+			fmt.Fprintf(w, "    n%d%s -> n%d:w [style=dashed arrowhead=none];\n", parent.idx, tailPort, n.idx)
+		} else {
+			fmt.Fprintf(w, "    n%d%s -> n%d:w;\n", parent.idx, tailPort, n.idx)
+		}
 	}
-	return strings.Join(escaped, "<br/>")
+
+	fmt.Fprintln(w, "}")
 }
 
 // ── small utilities ───────────────────────────────────────────────────────────
@@ -826,12 +865,15 @@ func hashDisplay(h common.Hash) string {
 	return hex
 }
 
-// mEsc escapes characters that have syntactic meaning inside a Mermaid
-// double-quoted label string.
-func mEsc(s string) string {
-	s = strings.ReplaceAll(s, "&", "&amp;")
-	s = strings.ReplaceAll(s, "\"", "#quot;")
-	s = strings.ReplaceAll(s, "<", "&lt;")
-	s = strings.ReplaceAll(s, ">", "&gt;")
+// dotRecEsc escapes characters that are syntactically special inside a
+// Graphviz shape=record label cell: braces, pipes, and angle brackets.
+// Backslash must be escaped first to avoid double-escaping.
+func dotRecEsc(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, "{", `\{`)
+	s = strings.ReplaceAll(s, "}", `\}`)
+	s = strings.ReplaceAll(s, "|", `\|`)
+	s = strings.ReplaceAll(s, "<", `\<`)
+	s = strings.ReplaceAll(s, ">", `\>`)
 	return s
 }

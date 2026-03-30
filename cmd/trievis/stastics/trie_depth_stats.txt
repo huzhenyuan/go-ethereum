@@ -1,0 +1,20 @@
+=== Account Trie ===
+  Total nodes :     891,076,278
+  Min depth   :               0
+  Max depth   :              13
+  Mean depth  :            8.12
+  Median depth:             8.0
+  P90 depth   :             9.0
+  P95 depth   :             9.0
+  P99 depth   :            10.0
+
+=== Storage Tries (aggregate) ===
+  Total nodes :   3,609,228,875
+  Min depth   :               0
+  Max depth   :              13
+  Mean depth  :            5.34
+  Median depth:             5.0
+  P90 depth   :             8.0
+  P95 depth   :             8.0
+  P99 depth   :             9.0
+

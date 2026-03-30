@@ -1,0 +1,15 @@
+=== Account Trie ===
+  Total nodes :     891,076,278
+  Total size  :  59,247,690,070  (56503.0 MB)
+  Short nodes :     378,896,752
+  Full  nodes :     138,145,767
+  Value nodes :     374,033,759
+
+=== Storage Tries (aggregate) ===
+  Total nodes :   3,609,228,875
+  Total size  : 145,513,148,860  (138772.2 MB)
+  Short nodes :   1,550,373,223
+  Full  nodes :     524,768,895
+  Value nodes :   1,534,086,757
+
+Storage tries count: 26,015,809

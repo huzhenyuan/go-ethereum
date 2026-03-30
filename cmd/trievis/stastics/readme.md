@@ -14,7 +14,55 @@ Account Hash = keccak256(ContractAddress)
 
 上面这个例子中, path=000204, 说明这个Leaf下面的Value, 是024大头的, value是024 加上 key-segment 里面的 5 c c 4 d....., 那就是0245cc4d...的value
 
-## 统计结果
+
+
+## 单个合约内容统计
+root@zkp:~# geth --datadir /data2 db inspect-trie --contract 0x77777779B121cCf5CEcda0eDc3502c6085914fa5
+INFO [03-30|16:28:53.529] Maximum peer count                       ETH=50 total=50
+INFO [03-30|16:28:53.530] Smartcard socket not found, disabling    err="stat /run/pcscd/pcscd.comm: no such file or directory"
+INFO [03-30|16:28:53.533] Set global gas cap                       cap=50,000,000
+INFO [03-30|16:28:53.533] Initializing the KZG library             backend=gokzg
+INFO [03-30|16:28:53.539] Using pebble as the backing database
+INFO [03-30|16:28:53.539] Allocated cache and file handles         database=/data2/geth/chaindata cache=512.00MiB handles=32767
+INFO [03-30|16:28:54.586] Opened ancient database                  database=/data2/geth/chaindata/ancient/chain readonly=false
+INFO [03-30|16:28:54.586] Opened Era store                         datadir=/data2/geth/chaindata/ancient/chain/era
+INFO [03-30|16:28:54.587] State scheme set to already existing     scheme=path
+INFO [03-30|16:28:54.587] Load database journal from file          path=/data2/geth/triedb/merkle.journal
+INFO [03-30|16:28:56.590] Opened ancient database                  database=/data2/geth/chaindata/ancient/state readonly=true
+INFO [03-30|16:28:56.591] Initialized path database                readonly=true  triecache=16.00MiB statecache=16.00MiB buffer=0.00B state-history="entire chain" journal-dir=/data2/geth/triedb
+INFO [03-30|16:28:56.591] Inspecting contract                      address=0x77777779B121cCf5CEcda0eDc3502c6085914fa5 root=ebb80f..5dbf67 block=24,731,688
+
+=== Contract Inspection: 0x77777779B121cCf5CEcda0eDc3502c6085914fa5 ===
+Account hash: 0xbcb93cd3fbbf7cc1e4968dd1a6a6d62aba3699631d75882756a148f4b2a596e4
+
+Account snapshot: 70.00 B
+Snapshot storage: 105 slots (7.95 KiB)
+Storage trie:     243 nodes (9.73 KiB)
+
+Storage Trie Depth Distribution:
++-------+-------+------+-------+-------+----------+
+| Depth | Short | Full | Value | Nodes |   Size   |
++-------+-------+------+-------+-------+----------+
+|   0   |   0   |  1   |   0   |   1   | 532.00 B |
+|   1   |   0   |  16  |   0   |  16   | 3.05 KiB |
+|   2   |  74   |  14  |   0   |  88   | 4.63 KiB |
+|   3   |  30   |  1   |  73   |  104  | 1.44 KiB |
+|   4   |   2   |  0   |  30   |  32   | 92.00 B  |
+|   5   |   0   |  0   |   2   |   2   |  0.00 B  |
+
+上面表明, 总计243个key:
+ 1 
+16 
+88 
+104
+32 
+ 2 
+叶子节点(Value or Slot)数量105个
+73
+30
+ 2
+
+## 全局统计结果
 
 trie_depth_by_type.png 表明
 Account树中, 大多数的账户在Merkle树中 7 8 9这三层的叶子节点上
